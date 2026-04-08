@@ -17,7 +17,6 @@ class SignupActivity : AppCompatActivity() {
 
         binding = ActivitySignupBinding.inflate(layoutInflater)
         setContentView(binding.root)
-
         viewModel = ViewModelProvider(this)[AuthViewModel::class.java]
 
         binding.btnSignup1.setOnClickListener {
@@ -28,8 +27,7 @@ class SignupActivity : AppCompatActivity() {
             val confirmPassword = binding.etConfirmPassword.text.toString().trim()
 
             if (name.isEmpty() || email.isEmpty() || phone.isEmpty()
-                || password.isEmpty() || confirmPassword.isEmpty()
-            ) {
+                || password.isEmpty() || confirmPassword.isEmpty()) {
                 Toast.makeText(this, "All fields are required", Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
             }
