@@ -5,62 +5,11 @@
     android:layout_height="match_parent"
     android:background="@android:color/white">
 
-    <ScrollView
-        android:id="@+id/homeScroll"
+    <androidx.fragment.app.FragmentContainerView
+        android:id="@+id/homeFragmentContainer"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:layout_above="@id/bottomNavigation"
-        android:fillViewport="true">
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:paddingStart="16dp"
-            android:paddingTop="20dp"
-            android:paddingEnd="16dp"
-            android:paddingBottom="24dp">
-
-            <com.google.android.material.card.MaterialCardView
-                android:id="@+id/bannerCard"
-                android:layout_width="match_parent"
-                android:layout_height="200dp"
-                app:cardBackgroundColor="@android:color/white"
-                app:cardCornerRadius="18dp"
-                app:cardElevation="8dp"
-                app:strokeColor="#14000000"
-                app:strokeWidth="1dp">
-
-                <androidx.viewpager2.widget.ViewPager2
-                    android:id="@+id/bannerPager"
-                    android:layout_width="match_parent"
-                    android:layout_height="match_parent"
-                    android:contentDescription="Home banner slider" />
-
-            </com.google.android.material.card.MaterialCardView>
-
-            <TextView
-                android:id="@+id/tvPromiseTitle"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="24dp"
-                android:text="Today's Promise Verse"
-                android:textColor="@android:color/black"
-                android:textSize="22sp"
-                android:textStyle="bold" />
-
-            <androidx.recyclerview.widget.RecyclerView
-                android:id="@+id/promiseRecyclerView"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="14dp"
-                android:clipToPadding="false"
-                android:nestedScrollingEnabled="false"
-                android:overScrollMode="never"
-                android:paddingEnd="8dp" />
-
-        </LinearLayout>
-    </ScrollView>
+        android:layout_above="@id/bottomNavigation"/>
 
     <com.google.android.material.bottomnavigation.BottomNavigationView
         android:id="@+id/bottomNavigation"
@@ -75,5 +24,4 @@
         app:itemTextColor="@color/bottom_nav_item_colors"
         app:labelVisibilityMode="labeled"
         app:menu="@menu/bottom_menu" />
-
 </RelativeLayout>

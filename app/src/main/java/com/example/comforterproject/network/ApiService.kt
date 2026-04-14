@@ -2,12 +2,12 @@ package com.example.comforterproject.network
 
 import com.example.comforterproject.model.AuthResponse
 import com.example.comforterproject.model.BannerResponse
+import com.example.comforterproject.model.MusicAlbumResponse
+import com.example.comforterproject.model.MusicSongsResponse
 import com.example.comforterproject.model.PromiseResponse
 import retrofit2.Response
 import retrofit2.http.*
-
 interface ApiService {
-
     @FormUrlEncoded
     @POST("register")
     suspend fun signup(
@@ -32,4 +32,14 @@ interface ApiService {
 
     @GET("todays-promise")
     suspend fun getTodaysPromise(): Response<PromiseResponse>
+
+    @GET
+    suspend fun getAlbums(
+        @Url url: String
+    ): Response<MusicAlbumResponse>
+
+    @GET
+    suspend fun getSongs(
+        @Url url: String
+    ): Response<MusicSongsResponse>
 }

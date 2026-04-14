@@ -5,4 +5,5 @@
     <color name="bottom_nav_background">#FFFFFFFF</color>
     <color name="bottom_nav_selected">#FF000000</color>
     <color name="bottom_nav_unselected">#99000000</color>
+    <color name="blue">#FF34A6F4</color>
 </resources>

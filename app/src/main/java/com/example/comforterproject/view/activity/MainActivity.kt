@@ -6,7 +6,6 @@ import android.widget.Button
 import androidx.appcompat.app.AppCompatActivity
 import com.example.comforterproject.R
 class MainActivity : AppCompatActivity() {
-
     override fun onCreate(savedInstanceState: Bundle?) {
 
         super.onCreate(savedInstanceState)
@@ -19,6 +18,7 @@ class MainActivity : AppCompatActivity() {
         btnLogin.setOnClickListener {
             startActivity(Intent(this, LoginActivity::class.java))
         }
+
         btnSignup.setOnClickListener {
             startActivity(Intent(this, SignupActivity::class.java))
         }
