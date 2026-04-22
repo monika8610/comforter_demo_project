@@ -1,36 +1,29 @@
 package com.example.comforterproject.view.fragment
 
-import android.media.AudioAttributes
-import android.media.MediaPlayer
-import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
+import android.Manifest
+import android.content.*
+import android.content.pm.PackageManager
+import android.net.Uri
+import android.os.*
 import android.util.Log
-import android.view.LayoutInflater
-import android.view.View
-import android.view.ViewGroup
-import android.widget.ImageButton
-import android.widget.ImageView
-import android.widget.SeekBar
-import android.widget.TextView
-import android.widget.Toast
+import android.view.*
+import android.widget.*
+import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import com.bumptech.glide.Glide
 import com.example.comforterproject.R
 import com.example.comforterproject.model.MusicSongItem
 import com.example.comforterproject.repository.MusicRepository
+import com.example.comforterproject.service.AudioPlaybackService
 import kotlinx.coroutines.launch
-
 class SongFragment : Fragment() {
-
     companion object {
         private const val ARG_ALBUM_ID = "arg_album_id"
         private const val ARG_ALBUM_NAME = "arg_album_name"
         private const val ARG_IMAGE_URL = "arg_image_url"
         private const val ARG_INITIAL_SONG_FILE = "arg_initial_song_file"
         private const val TAG = "SongFragment"
-
         fun newInstance(
             albumId: String,
             albumName: String,
@@ -47,15 +40,13 @@ class SongFragment : Fragment() {
             }
         }
     }
-
     private val musicRepository = MusicRepository()
     private val progressHandler = Handler(Looper.getMainLooper())
-    private var mediaPlayer: MediaPlayer? = null
     private var songs: List<MusicSongItem> = emptyList()
     private var audioBaseUrl: String? = null
     private var currentSongIndex: Int = 0
-    private var isPrepared = false
-
+    private var playbackService: AudioPlaybackService? = null
+    private var isServiceBound = false
     private var albumImageView: ImageView? = null
     private var albumTitleView: TextView? = null
     private var songTitleView: TextView? = null
@@ -65,34 +56,67 @@ class SongFragment : Fragment() {
     private var playPauseButton: ImageButton? = null
     private var previousButton: ImageButton? = null
     private var nextButton: ImageButton? = null
+    private val serviceConnection = object : ServiceConnection {
+        override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
+            val localBinder = binder as? AudioPlaybackService.LocalBinder ?: return
+            playbackService = localBinder.getService()
 
-    private val progressRunnable = object : Runnable {
-        override fun run() {
-            val player = mediaPlayer ?: return
-            if (isPrepared) {
-                seekBar?.progress = player.currentPosition
-                currentTimeView?.text = formatTime(player.currentPosition)
-                totalTimeView?.text = formatTime(player.duration)
-                progressHandler.postDelayed(this, 500)
+            playbackService?.setOnCompletionListener {
+                activity?.runOnUiThread {
+                    if (currentSongIndex < songs.lastIndex) {
+                        startSongAt(currentSongIndex + 1)
+                    } else {
+                        updatePlayPauseIcon(false)
+                    }
+                }
             }
+            isServiceBound = true
+            syncUiFromService()
+        }
+
+        override fun onServiceDisconnected(name: ComponentName?) {
+            playbackService = null
+            isServiceBound = false
+            isServiceBound = true
+            syncUiFromService()
+            progressHandler.post(progressRunnable)
         }
     }
 
-    override fun onCreateView(
-        inflater: LayoutInflater,
-        container: ViewGroup?,
-        savedInstanceState: Bundle?
-    ): View {
+    private val progressRunnable = object : Runnable {
+        override fun run() {
+            val service = playbackService
+            if (service != null && service.isPrepared()) {
+                val current = service.getCurrentPosition()
+                val duration = service.getDuration()
+                seekBar?.max = duration
+                seekBar?.progress = current
+                currentTimeView?.text = formatTime(current)
+                totalTimeView?.text = formatTime(duration)
+                updatePlayPauseIcon(service.isPlaying())
+            }
+            progressHandler.postDelayed(this, 300)
+        }
+    }
+
+    override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
         return inflater.inflate(R.layout.fragment_song, container, false)
     }
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(
+                    requireContext(),
+                    Manifest.permission.POST_NOTIFICATIONS
+                ) != PackageManager.PERMISSION_GRANTED
+            ) {
+                requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1001)
+            }
+        }
 
         val albumName = arguments?.getString(ARG_ALBUM_NAME).orEmpty()
         val imageUrl = arguments?.getString(ARG_IMAGE_URL)
-
-        val backButton = view.findViewById<ImageButton>(R.id.songBackButton)
         albumImageView = view.findViewById(R.id.songAlbumImage)
         albumTitleView = view.findViewById(R.id.songAlbumTitle)
         songTitleView = view.findViewById(R.id.songTrackTitle)
@@ -102,240 +126,202 @@ class SongFragment : Fragment() {
         playPauseButton = view.findViewById(R.id.songPlayPauseButton)
         previousButton = view.findViewById(R.id.songPreviousButton)
         nextButton = view.findViewById(R.id.songNextButton)
-
         albumTitleView?.text = albumName
-        songTitleView?.text = "Loading..."
-        currentTimeView?.text = "0:00"
-        totalTimeView?.text = "0:00"
-
         Glide.with(this)
             .load(imageUrl)
-            .placeholder(R.drawable.home_banner_placeholder)
-            .error(R.drawable.home_banner_placeholder)
             .into(albumImageView!!)
+        loadSongs()
 
-        backButton.setOnClickListener {
-            parentFragmentManager.popBackStack()
-        }
-
-        playPauseButton?.setOnClickListener {
-            togglePlayback()
-        }
-
-        previousButton?.setOnClickListener {
-            playPreviousSong()
-        }
-
-        nextButton?.setOnClickListener {
-            playNextSong()
-        }
+        playPauseButton?.setOnClickListener { togglePlayback() }
+        previousButton?.setOnClickListener { playPreviousSong() }
+        nextButton?.setOnClickListener { playNextSong() }
+        seekBar = view.findViewById(R.id.songSeekBar)
 
         seekBar?.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
                 if (fromUser) {
-                    currentTimeView?.text = formatTime(progress)
+                    playbackService?.let {
+                        if (it.isPrepared()) {
+                            it.seekTo(progress)
+                        }
+                    }
                 }
             }
 
-            override fun onStartTrackingTouch(seekBar: SeekBar?) = Unit
+            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
 
-            override fun onStopTrackingTouch(seekBar: SeekBar?) {
-                if (isPrepared) {
-                    mediaPlayer?.seekTo(seekBar?.progress ?: 0)
-                }
-            }
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
         })
-
-        loadSongs()
     }
+
+    override fun onStart() {
+        super.onStart()
+        bindToPlaybackService()
+    }
+
 
     override fun onStop() {
-        super.onStop()
-        if (mediaPlayer?.isPlaying == true) {
-            mediaPlayer?.pause()
-            updatePlayPauseIcon()
-        }
-    }
-
-    override fun onDestroyView() {
         progressHandler.removeCallbacks(progressRunnable)
-        releasePlayer()
-        albumImageView = null
-        albumTitleView = null
-        songTitleView = null
-        currentTimeView = null
-        totalTimeView = null
-        seekBar = null
-        playPauseButton = null
-        previousButton = null
-        nextButton = null
-        super.onDestroyView()
-    }
-
-    private fun loadSongs() {
-        val albumId = arguments?.getString(ARG_ALBUM_ID).orEmpty()
-        val initialSongFile = arguments?.getString(ARG_INITIAL_SONG_FILE)
-
-        viewLifecycleOwner.lifecycleScope.launch {
-            runCatching {
-                musicRepository.getSongs(albumId)
-            }.onSuccess { response ->
-                val body = response.body()
-                songs = body?.data.orEmpty()
-                audioBaseUrl = normalizeBaseUrl(body?.file_path)
-
-                if (!response.isSuccessful || songs.isEmpty() || audioBaseUrl == null) {
-                    showSongUnavailable()
-                    return@onSuccess
-                }
-
-                currentSongIndex = songs.indexOfFirst { it.songsFile == initialSongFile }
-                    .takeIf { it >= 0 } ?: 0
-
-                startSongAt(currentSongIndex)
-            }.onFailure {
-                Log.e(TAG, "Unable to load song list", it)
-                showSongUnavailable()
-            }
-        }
+        unbindFromPlaybackService()
+        super.onStop()
     }
 
     private fun startSongAt(index: Int) {
         val song = songs.getOrNull(index) ?: return
         val baseUrl = audioBaseUrl ?: return
-        val fileName = song.songsFile?.trim().orEmpty()
-        if (fileName.isBlank()) {
-            showSongUnavailable()
+        val songFile = song.songsFile
+        currentSongIndex = index
+        songTitleView?.text = song.songsName
+
+        if (songFile.isNullOrBlank()) {
+            Toast.makeText(requireContext(), "Song not available", Toast.LENGTH_SHORT).show()
             return
         }
 
-        currentSongIndex = index
-        songTitleView?.text = song.songsName
-        currentTimeView?.text = "0:00"
-        totalTimeView?.text = "0:00"
-        seekBar?.progress = 0
-        updateSkipButtons()
-        prepareAndPlay("$baseUrl/${fileName.trimStart('/')}")
+        val audioUrl = buildAudioUrl(baseUrl, songFile)
+        if (audioUrl.isNullOrBlank()) {
+            Toast.makeText(requireContext(), "Invalid audio source", Toast.LENGTH_SHORT).show()
+            Log.e(TAG, "Invalid audio URL. baseUrl=$baseUrl, songFile=$songFile")
+            return
+        }
+
+        playFromService(
+            audioUrl,
+            song.songsName.orEmpty(),
+            arguments?.getString(ARG_IMAGE_URL)
+        )
     }
 
-    private fun prepareAndPlay(audioUrl: String) {
-        progressHandler.removeCallbacks(progressRunnable)
-        releasePlayer()
-        isPrepared = false
-        playPauseButton?.isEnabled = false
+    private fun playFromService(audioUrl: String, title: String, imageUrl: String?) {
+        val context = context ?: return
+        Log.d(TAG, "Starting playback with URL: $audioUrl")
 
-        mediaPlayer = MediaPlayer().apply {
-            setAudioAttributes(
-                AudioAttributes.Builder()
-                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-                    .setUsage(AudioAttributes.USAGE_MEDIA)
-                    .build()
-            )
-            setOnPreparedListener { player ->
-                isPrepared = true
-                seekBar?.max = player.duration
-                totalTimeView?.text = formatTime(player.duration)
-                playPauseButton?.isEnabled = true
-                player.start()
-                updatePlayPauseIcon()
-                progressHandler.post(progressRunnable)
-            }
-            setOnCompletionListener {
-                if (currentSongIndex < songs.lastIndex) {
-                    startSongAt(currentSongIndex + 1)
-                } else {
-                    seekBar?.progress = seekBar?.max ?: 0
-                    currentTimeView?.text = totalTimeView?.text
-                    updatePlayPauseIcon(isPlaying = false)
-                }
-            }
-            setOnErrorListener { _, _, _ ->
-                showSongUnavailable()
-                true
+        val intent = Intent(context, AudioPlaybackService::class.java).apply {
+            action = AudioPlaybackService.ACTION_PLAY
+            putExtra(AudioPlaybackService.EXTRA_AUDIO_URL, audioUrl)
+            putExtra(AudioPlaybackService.EXTRA_TITLE, title)
+            putExtra(AudioPlaybackService.EXTRA_IMAGE_URL, imageUrl)
+        }
+
+        Handler(Looper.getMainLooper()).post {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(intent)
+            } else {
+                context.startService(intent)
             }
         }
 
-        runCatching {
-            mediaPlayer?.setDataSource(audioUrl)
-            mediaPlayer?.prepareAsync()
-        }.onFailure {
-            Log.e(TAG, "Unable to prepare audio", it)
-            showSongUnavailable()
-        }
+        progressHandler.postDelayed(progressRunnable, 300)
     }
 
     private fun togglePlayback() {
-        val player = mediaPlayer ?: return
-        if (!isPrepared) return
-
-        if (player.isPlaying) {
-            player.pause()
-            progressHandler.removeCallbacks(progressRunnable)
-        } else {
-            player.start()
-            progressHandler.post(progressRunnable)
+        val context = context ?: return
+        val intent = Intent(context, AudioPlaybackService::class.java).apply {
+            action = AudioPlaybackService.ACTION_TOGGLE
         }
-        updatePlayPauseIcon()
+        context.startService(intent)
+
+        // ADD THIS 👇 (small delay to sync)
+        Handler(Looper.getMainLooper()).postDelayed({
+            updatePlayPauseIcon(playbackService?.isPlaying() == true)
+        }, 200)
     }
 
     private fun playPreviousSong() {
-        if (currentSongIndex > 0) {
-            startSongAt(currentSongIndex - 1)
-        }
+        if (songs.isEmpty()) return
+
+        val prevIndex = if (currentSongIndex - 1 < 0) songs.lastIndex else currentSongIndex - 1
+        startSongAt(prevIndex)
     }
 
     private fun playNextSong() {
-        if (currentSongIndex < songs.lastIndex) {
-            startSongAt(currentSongIndex + 1)
-        }
+        if (songs.isEmpty()) return
+
+        val nextIndex = (currentSongIndex + 1) % songs.size
+        startSongAt(nextIndex)
     }
 
-    private fun updatePlayPauseIcon(isPlaying: Boolean = mediaPlayer?.isPlaying == true) {
+    private fun updatePlayPauseIcon(isPlaying: Boolean) {
         playPauseButton?.setImageResource(
             if (isPlaying) android.R.drawable.ic_media_pause
             else android.R.drawable.ic_media_play
         )
     }
 
-    private fun updateSkipButtons() {
-        previousButton?.alpha = if (currentSongIndex > 0) 1f else 0.4f
-        previousButton?.isEnabled = currentSongIndex > 0
-        nextButton?.alpha = if (currentSongIndex < songs.lastIndex) 1f else 0.4f
-        nextButton?.isEnabled = currentSongIndex < songs.lastIndex
+    private fun bindToPlaybackService() {
+        val context = context ?: return
+        val intent = Intent(context, AudioPlaybackService::class.java)
+        context.bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
     }
 
-    private fun normalizeBaseUrl(path: String?): String? {
-        if (path.isNullOrBlank()) return null
-        return when {
-            path.startsWith("//") -> "https:${path.trimEnd('/')}"
-            path.startsWith("http://") || path.startsWith("https://") -> path.trimEnd('/')
-            else -> "https://${path.trimEnd('/')}"
+    private fun unbindFromPlaybackService() {
+        val context = context ?: return
+        if (isServiceBound) {
+            context.unbindService(serviceConnection)
+            isServiceBound = false
         }
     }
 
-    private fun formatTime(milliseconds: Int): String {
-        val totalSeconds = milliseconds / 1000
-        val minutes = totalSeconds / 60
-        val seconds = totalSeconds % 60
-        return String.format("%d:%02d", minutes, seconds)
+    private fun syncUiFromService() {
+        val service = playbackService ?: return
+        updatePlayPauseIcon(service.isPlaying())
+        progressHandler.post(progressRunnable)
     }
 
-    private fun showSongUnavailable() {
-        if (!isAdded) return
-        Toast.makeText(requireContext(), "Unable to play song", Toast.LENGTH_SHORT).show()
-        songTitleView?.text = "Song not available"
-        playPauseButton?.isEnabled = false
-        updateSkipButtons()
-        progressHandler.removeCallbacks(progressRunnable)
-        releasePlayer()
-    }
+    private fun loadSongs() {
+        val albumId = arguments?.getString(ARG_ALBUM_ID).orEmpty()
 
-    private fun releasePlayer() {
-        mediaPlayer?.runCatching {
-            stop()
+        viewLifecycleOwner.lifecycleScope.launch {
+            runCatching {
+                musicRepository.getSongs(albumId)
+            }.onSuccess {
+                songs = it.body()?.data.orEmpty()
+                audioBaseUrl = it.body()?.file_path
+                startSongAt(0)
+            }.onFailure {
+                Toast.makeText(requireContext(), "Error loading songs", Toast.LENGTH_SHORT).show()
+            }
         }
-        mediaPlayer?.release()
-        mediaPlayer = null
-        isPrepared = false
+    }
+
+    private fun formatTime(ms: Int): String {
+        val totalSec = ms / 1000
+        val min = totalSec / 60
+        val sec = totalSec % 60
+        return String.format("%d:%02d", min, sec)
+    }
+
+    private fun buildAudioUrl(baseUrl: String, songFile: String): String? {
+        val normalizedFile = normalizeNetworkPath(songFile.trim())
+        if (normalizedFile.isEmpty()) return null
+
+        val directUri = Uri.parse(normalizedFile)
+        if (!directUri.scheme.isNullOrBlank()) {
+            return normalizedFile
+        }
+
+        val normalizedBase = normalizeNetworkPath(baseUrl.trim()).trimEnd('/')
+        if (normalizedBase.isEmpty()) return null
+
+        return try {
+            val baseUri = Uri.parse(normalizedBase)
+            val combinedPath = buildString {
+                append(baseUri.encodedPath?.trimEnd('/').orEmpty())
+                append('/')
+                append(normalizedFile.trimStart('/'))
+            }
+
+            baseUri.buildUpon()
+                .encodedPath(combinedPath)
+                .build()
+                .toString()
+        } catch (error: Exception) {
+            Log.e(TAG, "Failed to build audio URL from baseUrl=$baseUrl and songFile=$songFile", error)
+            null
+        }
+    }
+
+    private fun normalizeNetworkPath(value: String): String {
+        return if (value.startsWith("//")) "https:$value" else value
     }
 }

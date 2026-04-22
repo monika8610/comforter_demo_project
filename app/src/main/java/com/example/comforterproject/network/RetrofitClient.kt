@@ -5,10 +5,8 @@ import okhttp3.Request
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 
-object RetrofitClient {
-
+object  RetrofitClient {
     private const val BASE_URL = "https://comfortertv.com/api/"
-
     private val client = OkHttpClient.Builder()
         .addInterceptor { chain ->
             val request = chain.request().newBuilder()
