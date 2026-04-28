@@ -13,6 +13,7 @@ import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import com.example.comforterproject.model.MusicSongItem
 import com.example.comforterproject.R
 import com.example.comforterproject.repository.MusicRepository
 import com.example.comforterproject.view.activity.HomeActivity
@@ -39,15 +40,14 @@ class MusicFragment : Fragment() {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
-
         albumRecyclerView = view.findViewById(R.id.albumRecyclerView)
         emptyTextView = view.findViewById(R.id.emptyTextView)
 
         albumRecyclerView?.layoutManager = GridLayoutManager(requireContext(), 2)
         if (albumRecyclerView?.itemDecorationCount == 0) {
+
             albumRecyclerView?.addItemDecoration(GridSpacingItemDecoration(2, 18))
         }
-
         loadAlbums()
     }
 
@@ -71,7 +71,7 @@ class MusicFragment : Fragment() {
                         items = albums,
                         imageBaseUrl = imageBaseUrl
                     ) { albumId, albumName, imageUrl ->
-                        (activity as? HomeActivity)?.openMusicDetail(albumId, albumName, imageUrl)
+                        fetchSongsAndOpenDetail(albumId, albumName, imageUrl)
                     }
                     albumRecyclerView?.isVisible = true
                     emptyTextView?.isVisible = false
@@ -94,6 +94,39 @@ class MusicFragment : Fragment() {
                     "Unable to load albums",
                     Toast.LENGTH_SHORT
                 ).show()
+            }
+        }
+    }
+
+    private fun fetchSongsAndOpenDetail(albumId: String, albumName: String, imageUrl: String?) {
+        viewLifecycleOwner.lifecycleScope.launch {
+            runCatching {
+                musicRepository.getSongs(albumId)
+            }.onSuccess { response ->
+                val songs = ArrayList(response.body()?.data.orEmpty())
+                val audioBaseUrl = response.body()?.file_path
+
+                (activity as? HomeActivity)?.openMusicDetail(
+                    albumId = albumId,
+                    albumName = albumName,
+                    imageUrl = imageUrl,
+                    songs = songs,
+                    audioBaseUrl = audioBaseUrl
+                )
+            }.onFailure { error ->
+                Log.e(TAG, "Unable to load songs for albumId=$albumId", error)
+                Toast.makeText(
+                    requireContext(),
+                    "Unable to load songs",
+                    Toast.LENGTH_SHORT
+                ).show()
+                (activity as? HomeActivity)?.openMusicDetail(
+                    albumId = albumId,
+                    albumName = albumName,
+                    imageUrl = imageUrl,
+                    songs = arrayListOf<MusicSongItem>(),
+                    audioBaseUrl = null
+                )
             }
         }
     }

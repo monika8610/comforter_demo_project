@@ -22,20 +22,32 @@ class SongFragment : Fragment() {
         private const val ARG_ALBUM_ID = "arg_album_id"
         private const val ARG_ALBUM_NAME = "arg_album_name"
         private const val ARG_IMAGE_URL = "arg_image_url"
+        private const val ARG_INITIAL_SONG_INDEX = "arg_initial_song_index"
+        private const val ARG_INITIAL_SONG_ID = "arg_initial_song_id"
         private const val ARG_INITIAL_SONG_FILE = "arg_initial_song_file"
+        private const val ARG_SONGS = "arg_songs"
+        private const val ARG_AUDIO_BASE_URL = "arg_audio_base_url"
         private const val TAG = "SongFragment"
         fun newInstance(
             albumId: String,
             albumName: String,
             imageUrl: String?,
-            initialSongFile: String?
+            initialSongIndex: Int,
+            initialSongId: String?,
+            initialSongFile: String?,
+            songs: ArrayList<MusicSongItem>,
+            audioBaseUrl: String?
         ): SongFragment {
             return SongFragment().apply {
                 arguments = Bundle().apply {
                     putString(ARG_ALBUM_ID, albumId)
                     putString(ARG_ALBUM_NAME, albumName)
                     putString(ARG_IMAGE_URL, imageUrl)
+                    putInt(ARG_INITIAL_SONG_INDEX, initialSongIndex)
+                    putString(ARG_INITIAL_SONG_ID, initialSongId)
                     putString(ARG_INITIAL_SONG_FILE, initialSongFile)
+                    putSerializable(ARG_SONGS, songs)
+                    putString(ARG_AUDIO_BASE_URL, audioBaseUrl)
                 }
             }
         }
@@ -63,8 +75,13 @@ class SongFragment : Fragment() {
 
             playbackService?.setOnCompletionListener {
                 activity?.runOnUiThread {
-                    if (currentSongIndex < songs.lastIndex) {
-                        startSongAt(currentSongIndex + 1)
+                    val nextPlayableIndex = findPlayableSongIndex(
+                        startIndex = currentSongIndex + 1,
+                        step = 1
+                    )
+
+                    if (nextPlayableIndex != null) {
+                        startSongAt(nextPlayableIndex)
                     } else {
                         updatePlayPauseIcon(false)
                     }
@@ -77,9 +94,6 @@ class SongFragment : Fragment() {
         override fun onServiceDisconnected(name: ComponentName?) {
             playbackService = null
             isServiceBound = false
-            isServiceBound = true
-            syncUiFromService()
-            progressHandler.post(progressRunnable)
         }
     }
 
@@ -168,13 +182,19 @@ class SongFragment : Fragment() {
 
     private fun startSongAt(index: Int) {
         val song = songs.getOrNull(index) ?: return
-        val baseUrl = audioBaseUrl ?: return
+        val baseUrl = audioBaseUrl
         val songFile = song.songsFile
         currentSongIndex = index
         songTitleView?.text = song.songsName
 
         if (songFile.isNullOrBlank()) {
             Toast.makeText(requireContext(), "Song not available", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        if (baseUrl.isNullOrBlank()) {
+            Toast.makeText(requireContext(), "Song not available", Toast.LENGTH_SHORT).show()
+            Log.e(TAG, "Missing audio base URL for songFile=$songFile")
             return
         }
 
@@ -221,24 +241,38 @@ class SongFragment : Fragment() {
         }
         context.startService(intent)
 
-        // ADD THIS 👇 (small delay to sync)
         Handler(Looper.getMainLooper()).postDelayed({
             updatePlayPauseIcon(playbackService?.isPlaying() == true)
         }, 200)
     }
 
     private fun playPreviousSong() {
-        if (songs.isEmpty()) return
+        val previousPlayableIndex = findPlayableSongIndex(
+            startIndex = currentSongIndex - 1,
+            step = -1
+        )
+        println("##############---------------------previousPlayableIndex----${previousPlayableIndex}")
+        if (previousPlayableIndex == null) {
+            Toast.makeText(requireContext(), "Song not available", Toast.LENGTH_SHORT).show()
+            return
+        }
 
-        val prevIndex = if (currentSongIndex - 1 < 0) songs.lastIndex else currentSongIndex - 1
-        startSongAt(prevIndex)
+        startSongAt(previousPlayableIndex)
     }
 
     private fun playNextSong() {
-        if (songs.isEmpty()) return
+        val nextPlayableIndex = findPlayableSongIndex(
+            startIndex = currentSongIndex + 1,
+            step = 1
+        )
+        println("##############---------------------nextPlayableIndex----${nextPlayableIndex}")
 
-        val nextIndex = (currentSongIndex + 1) % songs.size
-        startSongAt(nextIndex)
+        if (nextPlayableIndex == null) {
+            Toast.makeText(requireContext(), "Song not available", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        startSongAt(nextPlayableIndex)
     }
 
     private fun updatePlayPauseIcon(isPlaying: Boolean) {
@@ -270,18 +304,96 @@ class SongFragment : Fragment() {
 
     private fun loadSongs() {
         val albumId = arguments?.getString(ARG_ALBUM_ID).orEmpty()
+        val initialSongIndex = arguments?.getInt(ARG_INITIAL_SONG_INDEX, -1) ?: -1
+        val initialSongFile = arguments?.getString(ARG_INITIAL_SONG_FILE)
+        val argumentSongs = readSongsArguments()
+        val argumentAudioBaseUrl = arguments?.getString(ARG_AUDIO_BASE_URL)
+
+        if (argumentSongs.isNotEmpty() && !argumentAudioBaseUrl.isNullOrBlank()) {
+            songs = argumentSongs
+            audioBaseUrl = argumentAudioBaseUrl
+            playInitialSong(initialSongIndex, initialSongFile)
+            return
+        }
 
         viewLifecycleOwner.lifecycleScope.launch {
             runCatching {
                 musicRepository.getSongs(albumId)
-            }.onSuccess {
-                songs = it.body()?.data.orEmpty()
-                audioBaseUrl = it.body()?.file_path
-                startSongAt(0)
+            }.onSuccess { response ->
+                songs = response.body()?.data.orEmpty()
+                audioBaseUrl = response.body()?.file_path
+                playInitialSong(initialSongIndex, initialSongFile)
             }.onFailure {
                 Toast.makeText(requireContext(), "Error loading songs", Toast.LENGTH_SHORT).show()
             }
         }
+    }
+
+    private fun playInitialSong(initialSongIndex: Int, initialSongFile: String?) {
+        val initialIndex = resolveInitialSongIndex(initialSongIndex, initialSongFile)
+        if (initialIndex == null) {
+            songTitleView?.text = "Song not available"
+            Toast.makeText(requireContext(), "Song not available", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        startSongAt(initialIndex)
+    }
+
+    private fun resolveInitialSongIndex(initialSongIndex: Int, initialSongFile: String?): Int? {
+        if (songs.isEmpty()) return null
+
+        if (initialSongIndex in songs.indices && !songs[initialSongIndex].songsFile.isNullOrBlank()) {
+            return initialSongIndex
+        }
+
+        val normalizedInitialSongFile = initialSongFile
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+
+        val requestedIndexByFile = normalizedInitialSongFile?.let { requestedFile ->
+            songs.indexOfFirst { song ->
+                song.songsFile?.trim().equals(requestedFile, ignoreCase = true)
+            }.takeIf { it >= 0 }
+        }
+
+        if (requestedIndexByFile != null) {
+            return requestedIndexByFile
+        }
+
+        val requestedSongId = arguments?.getString(ARG_INITIAL_SONG_ID)
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+        val requestedIndexById = requestedSongId?.let { songId ->
+            songs.indexOfFirst { song ->
+                song.id?.trim().equals(songId, ignoreCase = true) && !song.songsFile.isNullOrBlank()
+            }.takeIf { it >= 0 }
+        }
+
+        return requestedIndexById ?: findPlayableSongIndex(startIndex = 0, step = 1)
+    }
+
+    private fun findPlayableSongIndex(startIndex: Int, step: Int): Int? {
+        if (songs.isEmpty() || step == 0) return null
+
+        var index = startIndex
+        while (index in songs.indices) {
+            val song = songs[index]
+            if (!song.songsFile.isNullOrBlank()) {
+                return index
+            }
+            index += step
+        }
+
+        return null
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun readSongsArguments(): List<MusicSongItem> {
+        val serializableSongs = arguments?.getSerializable(ARG_SONGS) as? ArrayList<*>
+        return serializableSongs
+            ?.filterIsInstance<MusicSongItem>()
+            .orEmpty()
     }
 
     private fun formatTime(ms: Int): String {

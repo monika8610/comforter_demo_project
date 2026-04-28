@@ -1,5 +1,7 @@
 package com.example.comforterproject.model
 
+import java.io.Serializable
+
 data class MusicAlbumResponse(
     val response: String,
     val data: List<MusicAlbumItem>,
@@ -19,7 +21,8 @@ data class MusicSongsResponse(
 )
 
 data class MusicSongItem(
+    val id: String? = null,
     val albumId: String,
     val songsName: String,
     val songsFile: String?
-)
+) : Serializable

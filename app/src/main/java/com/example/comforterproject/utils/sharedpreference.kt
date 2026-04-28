@@ -13,4 +13,12 @@ class PrefManager(context: Context) {
     fun getToken(): String? {
         return sharedPref.getString("USER_TOKEN", null)
     }
+
+    fun isLoggedIn(): Boolean {
+        return !getToken().isNullOrBlank()
+    }
+
+    fun clearToken() {
+        sharedPref.edit().remove("USER_TOKEN").apply()
+    }
 }

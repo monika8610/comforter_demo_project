@@ -6,7 +6,9 @@ import android.view.View
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.fragment.app.Fragment
+import com.example.comforterproject.model.MusicSongItem
 import com.example.comforterproject.R
+import com.example.comforterproject.utils.PrefManager
 import com.example.comforterproject.view.fragment.HomeFragment
 import com.example.comforterproject.view.fragment.MusicDetailFragment
 import com.example.comforterproject.view.fragment.MusicFragment
@@ -22,7 +24,6 @@ class HomeActivity : AppCompatActivity() {
         bottomNav.setOnItemSelectedListener { item ->
 
             when (item.itemId) {
-
                 R.id.nav_home -> {
                     showFragment(HomeFragment())
                     true
@@ -32,7 +33,7 @@ class HomeActivity : AppCompatActivity() {
                     showFragment(MusicFragment())
                     true
                 }
-
+                
                 R.id.nav_message -> {
                     Toast.makeText(this, "Message Clicked", Toast.LENGTH_SHORT).show()
                     true
@@ -40,9 +41,10 @@ class HomeActivity : AppCompatActivity() {
 
                 R.id.nav_logout -> {
                     Toast.makeText(this, "Logout Clicked", Toast.LENGTH_SHORT).show()
-                    val pref = getSharedPreferences("MyAppPrefs", MODE_PRIVATE)
-                    pref.edit().clear().apply()
-                    startActivity(Intent(this, SignupActivity::class.java))
+                    PrefManager(this).clearToken()
+                    val intent = Intent(this, MainActivity::class.java)
+                    intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+                    startActivity(intent)
                     finish()
                     true
                 }
@@ -67,11 +69,17 @@ class HomeActivity : AppCompatActivity() {
         syncBottomNavVisibility()
     }
 
-    fun openMusicDetail(albumId: String, albumName: String, imageUrl: String?) {
+    fun openMusicDetail(
+        albumId: String,
+        albumName: String,
+        imageUrl: String?,
+        songs: ArrayList<MusicSongItem>,
+        audioBaseUrl: String?
+    ) {
         supportFragmentManager.beginTransaction()
             .replace(
                 R.id.homeFragmentContainer,
-                MusicDetailFragment.newInstance(albumId, albumName, imageUrl)
+                MusicDetailFragment.newInstance(albumId, albumName, imageUrl, songs, audioBaseUrl)
             )
             .addToBackStack(MusicDetailFragment::class.java.simpleName)
             .commit()
@@ -82,12 +90,25 @@ class HomeActivity : AppCompatActivity() {
         albumId: String,
         albumName: String,
         imageUrl: String?,
-        initialSongFile: String?
+        initialSongIndex: Int,
+        initialSongId: String?,
+        initialSongFile: String?,
+        songs: ArrayList<MusicSongItem>,
+        audioBaseUrl: String?
     ) {
         supportFragmentManager.beginTransaction()
             .replace(
                 R.id.homeFragmentContainer,
-                SongFragment.newInstance(albumId, albumName, imageUrl, initialSongFile)
+                SongFragment.newInstance(
+                    albumId,
+                    albumName,
+                    imageUrl,
+                    initialSongIndex,
+                    initialSongId,
+                    initialSongFile,
+                    songs,
+                    audioBaseUrl
+                )
             )
             .addToBackStack(SongFragment::class.java.simpleName)
             .commit()

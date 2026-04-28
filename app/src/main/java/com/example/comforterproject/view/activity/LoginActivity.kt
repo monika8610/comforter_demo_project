@@ -7,6 +7,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.ViewModelProvider
 import com.example.comforterproject.databinding.ActivityLoginBinding
 import com.example.comforterproject.model.LoginRequest
+import com.example.comforterproject.utils.PrefManager
 import com.example.comforterproject.viewmodel.AuthViewModel
 class LoginActivity : AppCompatActivity() {
     private lateinit var binding: ActivityLoginBinding
@@ -43,10 +44,13 @@ class LoginActivity : AppCompatActivity() {
             Toast.makeText(this, response.message, Toast.LENGTH_SHORT).show()
 
             if (response.status) {
+                response.token?.let { token ->
+                    PrefManager(this).saveToken(token)
+                }
 
-                val intent = Intent(this, HomeActivity::class.java)
+                val intent = Intent(this, SplashActivity::class.java)
+                intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
                 startActivity(intent)
-                finish()
             }
         }
     }
